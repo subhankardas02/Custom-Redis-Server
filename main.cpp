@@ -12,6 +12,20 @@ void die(const char* msg) {
     exit(EXIT_FAILURE);
 }
 
+static void do_something(int connfd){
+    char rbuf[64]={};
+    ssize_t n=read(connfd, rbuf, sizeof(rbuf)-1);
+    if(n<0){
+        perror("read() failed");
+        return;
+    }
+    cout<<"client says: "<<endl;
+    cout<<rbuf<<endl;
+    char wbuf[]="world";
+    write(connfd, wbuf, strlen(wbuf));
+}
+
+
 int main(){
     // int fd=socket();
     // connect(fd, addr);
@@ -56,7 +70,7 @@ int main(){
         socklen_t addrlen=sizeof(client_addr);
         int connfd=accept(fd, (struct sockaddr *)&client_addr, &addrlen);
         if(connfd<0){
-            continue;
+            continue; // if error occurs, just continue to the next iteration of the loop
         }
 
         do_something(connfd);

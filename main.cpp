@@ -37,7 +37,16 @@ int main(){
         die("bind()");
     }
 
+    struct sockaddr_in {
+        uint16_t sin_family; // address family (AF_INET)
+        uint16_t sin_port;   // port in big endian
+        struct in_addr sin_addr; // IPv4 address
+    };
+    struct in_addr{
+        uint32_t s_addr; // IPv4 address in big endian
+    };
     
+
     
 
 }

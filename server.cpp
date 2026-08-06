@@ -22,7 +22,10 @@ static void do_something(int connfd){
     cout<<"client says: "<<endl;
     cout<<rbuf<<endl;
     char wbuf[]="world";
-    write(connfd, wbuf, strlen(wbuf));
+    ssize_t w_len=write(connfd, wbuf, strlen(wbuf));
+    if (w_len < 0) {
+        perror("write() failed");
+    }
 }
 
 

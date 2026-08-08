@@ -1,12 +1,15 @@
-#include <iostream>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <cstdio>
-#include <cstdlib>
-#include <cassert> // Required for assert()
-#include <cerrno>  // Required for errno
+#include <errno.h>
+#include <assert.h>
+#include <fcntl.h>
+#include <poll.h>
+
+#include <vector>
 
 using namespace std;
 
@@ -16,6 +19,16 @@ void die(const char* msg) {
 }
 static void msg(const char *msg){
     fprintf(stderr, "%s\n", msg);
+}
+
+static void fd_set_nonblocking(int fd){
+    int flags=fcntl(fd, F_GETFL, 0);
+    if(flags<0){
+        die("fcntl(F_GETFL)");
+    }
+    if(fcntl(fd, F_SETFL, flags | O_NONBLOCK)<0){
+        die("fcntl(F_SETFL)");
+    }
 }
 
 

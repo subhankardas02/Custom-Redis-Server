@@ -8,10 +8,12 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <poll.h>
-
 #include <vector>
 
 using namespace std;
+
+
+const size_t k_max_msg=4096;
 
 void die(const char* msg) {
     perror(msg);
@@ -30,6 +32,16 @@ static void fd_set_nonblocking(int fd){
         die("fcntl(F_SETFL)");
     }
 }
+// Connection State
+struct Conn{
+    int fd;
+    char rbuf[4+k_max_msg];
+    size_t rbuf_size=0;
+    char wbuf[4+k_max_msg];
+    size_t wbuf_size=0;
+    size_t wbuf_sent=0;
+}
+
 
 
 static int32_t read_full(int fd, char *buf, size_t n){
@@ -64,7 +76,6 @@ static int32_t write_all(int fd, const char *buf, size_t n){
 }
 
 
-const size_t k_max_msg=4096;
 
 static int32_t one_request(int connfd){
     char rbuf[4+k_max_msg];

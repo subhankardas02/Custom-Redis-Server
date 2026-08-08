@@ -21,7 +21,10 @@ static int32_t read_full(int fd, char *buf, size_t n){
 
     while(n>0){
         ssize_t rv=read(fd, buf, n);
-        if(rv<=0) return -1;
+        if(rv<=0){
+            if(rv<0 && errno==EINTR) continue; // Retry if interrupted by signal
+            return -1;  
+        }
         assert((size_t)rv<=n);
         n=n-(size_t)rv;
         buf=buf+rv;
@@ -35,6 +38,7 @@ static int32_t write_all(int fd, const char *buf, size_t n){
     while(n>0){
         ssize_t rv=write(fd, buf, n);
         if(rv<=0){
+            if(rv<0 && errno==EINTR) continue; // Retry if interrupted by signal
             return -1;
         }
         assert((size_t)rv<=n);
@@ -61,8 +65,9 @@ static size_t send_req(int fd, const char *text){
     }
 
     char rbuf[4+k_max_msg];
-    if(int32_t err=read_full(fd, rbuf, 4)){
-        msg("read() error");
+    errno = 0;
+    if (int32_t err = read_full(fd, rbuf, 4)) {
+        msg(errno == 0 ? "EOF" : "read() error");
         return err;
     }
 
@@ -98,7 +103,11 @@ int main(){
     if(rv<0){
         die("connect()");
     }
-
+    // while(true){
+    //     string s;
+    //     cin>>s;
+    //     send_req(fd, s.c_str());
+    // }
     send_req(fd, "hello");
     send_req(fd, "world");
     send_req(fd, "this is a custom redis client!");

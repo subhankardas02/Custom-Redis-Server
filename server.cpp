@@ -234,24 +234,24 @@ int main(){
 
 
 
-    //  Accept connections
-    while(true){
-        struct sockaddr_in client_addr={};
-        socklen_t addrlen=sizeof(client_addr);
-        int connfd=accept(fd, (struct sockaddr *)&client_addr, &addrlen);
-        if(connfd<0){
-            continue; // if error occurs, just continue to the next iteration of the loop
-        }
+    // //  Accept connections
+    // while(true){
+    //     struct sockaddr_in client_addr={};
+    //     socklen_t addrlen=sizeof(client_addr);
+    //     int connfd=accept(fd, (struct sockaddr *)&client_addr, &addrlen);
+    //     if(connfd<0){
+    //         continue; // if error occurs, just continue to the next iteration of the loop
+    //     }
 
-        // do_something(connfd);
-        while(true){
-            int32_t err=one_request(connfd);
-            if(err){
-                break;
-            }
-        }
+    //     // do_something(connfd);
+    //     while(true){
+    //         int32_t err=one_request(connfd);
+    //         if(err){
+    //             break;
+    //         }
+    //     }
 
-        close(connfd);
+    //     close(connfd);
 
     }
 

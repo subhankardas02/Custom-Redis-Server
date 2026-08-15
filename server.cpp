@@ -214,11 +214,21 @@ int main(){
         }
 
         // Handle existing connections
+        int poll_index=1; // Start from 1 because 0 is the listening socket
+
         for(int i=0; i<MAX_CONNECTIONS; i++){
 
             Conn* conn=connections[i];
             if(conn==nullptr) continue;
             short revents=pollfds[i+1].revents; // +1 because pollfds[0] is the listening socket
+            poll_index++;
+            bool alive=true;
+
+            // Error / hangup
+            if(revents & (POLLERR | POLLHUP | POLLNVAL)){
+                alive=false;
+            }
+
 
         }
 

@@ -5,261 +5,634 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <errno.h>
-#include <assert.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <vector>
+#include <stdint.h>
+#include <assert.h>
 
 using namespace std;
 
+const size_t k_max_msg = 4096;
+const int MAX_CONNECTIONS = 100;
 
-const size_t k_max_msg=4096;
-const size_t MAX_CONNECTIONS=1024;
 
-static void die(const char* msg) {
+// Error handling
+
+void die(const char* msg) {
     perror(msg);
     exit(EXIT_FAILURE);
 }
-static void msg(const char *msg){
+
+static void msg(const char* msg) {
     fprintf(stderr, "%s\n", msg);
 }
 
-static void fd_set_nonblocking(int fd){
-    int flags=fcntl(fd, F_GETFL, 0);
-    if(flags<0){
+
+// ============================================================
+// Make socket non-blocking
+// ============================================================
+
+static void fd_set_nonblocking(int fd) {
+
+    int flags = fcntl(fd, F_GETFL, 0);
+
+    if (flags < 0) {
         die("fcntl(F_GETFL)");
     }
-    if(fcntl(fd, F_SETFL, flags | O_NONBLOCK)<0){
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
         die("fcntl(F_SETFL)");
     }
 }
-// Connection State
-struct Conn{
+
+// Connection state
+
+struct Conn {
+
     int fd;
-    char rbuf[4+k_max_msg];
-    size_t rbuf_size=0;
-    char wbuf[4+k_max_msg];
-    size_t wbuf_size=0;
-    size_t wbuf_sent=0;
+
+    // Read buffer
+
+    char rbuf[4 + k_max_msg];
+
+    // Number of bytes currently stored in rbuf
+    size_t rbuf_size = 0;
+
+    // Write buffer
+
+    char wbuf[4 + k_max_msg];
+
+    // Total bytes that need to be written
+    size_t wbuf_size = 0;
+
+    // Number of bytes already written
+    size_t wbuf_sent = 0;
+};
+
+
+// Read data from client
+
+static bool handle_read(Conn* conn) {
+
+    while (true) {
+
+        size_t available =
+            sizeof(conn->rbuf) - conn->rbuf_size;
+
+
+        // Buffer is full
+
+        if (available == 0) {
+            return true;
+        }
+
+        // Read from socket
+
+        ssize_t rv = read(
+            conn->fd,
+            conn->rbuf + conn->rbuf_size,
+            available
+        );
+
+        // Error
+
+        if (rv < 0) {
+
+            // Signal interrupted the system call
+            if (errno == EINTR) {
+                continue;
+            }
+
+
+            // No more data available right now
+            if (errno == EAGAIN ||
+                errno == EWOULDBLOCK) {
+
+                return true;
+            }
+
+
+            perror("read()");
+            return false;
+        }
+
+        // Client closed connection
+
+        if (rv == 0) {
+
+            printf("Client disconnected\n");
+
+            return false;
+        }
+
+
+        // Successfully received data
+
+        conn->rbuf_size += (size_t)rv;
+
+        printf(
+            "Received %zd bytes\n",
+            rv
+        );
+
+    }
 }
 
 
+// Process one request
 
-// static int32_t read_full(int fd, char *buf, size_t n){
+static bool process_request(Conn* conn) {
 
-//     while(n>0){
-//         ssize_t rv=read(fd, buf, n);
-//         if(rv<=0){
-//             if(rv<0 && errno==EINTR) continue; // Retry if interrupted by signal
-//             return -1;  
-//         }
-//         assert((size_t)rv<=n);
-//         n=n-(size_t)rv;
-//         buf=buf+rv;
-//     }
-//     return 0;
+    // We need at least 4 bytes for the length header
 
-// }
-
-// static int32_t write_all(int fd, const char *buf, size_t n){
-//     while(n>0){
-//         ssize_t rv=write(fd, buf, n);
-//         if(rv<=0){
-//             if(rv<0 && errno==EINTR) continue; // Retry if interrupted by signal
-//             return -1;
-//         }
-//         assert((size_t)rv <= n);
-//         n=n-(size_t)rv;
-//         buf=buf+rv;
-//     }
-//     return 0;
-
-// }
-
-
-
-static int32_t one_request(int connfd){
-    char rbuf[4+k_max_msg];
-    errno=0;
-    int32_t err=read_full(connfd, rbuf, 4);
-    if(err){
-        msg(errno==0 ? "EOF" : "read() error");
-        return err;
-    }
-    
-    uint32_t len=0;
-    memcpy(&len, rbuf, 4);
-    if(len>k_max_msg){
-        msg("too long");
-        return -1;
+    if (conn->rbuf_size < 4) {
+        return true;
     }
 
-    err=read_full(connfd, &rbuf[4], len);
-    if(err){
-        msg("read() error");
-        return err;
+
+    // Read message length
+
+    uint32_t len = 0;
+
+    memcpy(
+        &len,
+        conn->rbuf,
+        4
+    );
+
+
+    // Validate message length
+
+    if (len > k_max_msg) {
+
+        msg("message too long");
+
+        return false;
     }
-    // do something
-    printf("client says: %.*s\n", len, &rbuf[4]);
-
-    // reply using the same protocol
-    const char reply[]="Your message was received";
-    char wbuf[4+sizeof(reply)];
-    len=(uint32_t)strlen(reply);
-    memcpy(wbuf, &len, 4);
-    memcpy(&wbuf[4], reply, len);
-    return write_all(connfd, wbuf, 4+len);
 
 
+
+    size_t total_size =
+        4 + (size_t)len;
+
+
+    // Complete request hasn't arrived yet
+
+    if (conn->rbuf_size < total_size) {
+
+        return true;
+    }
+
+
+    // Complete request received
+
+    printf(
+        "Client says: %.*s\n",
+        (int)len,
+        conn->rbuf + 4
+    );
+
+
+    // Create response
+
+    const char reply[] =
+        "Your message was received";
+
+
+    uint32_t reply_len =
+        (uint32_t)strlen(reply);
+
+
+    // Write response length
+
+    memcpy(
+        conn->wbuf,
+        &reply_len,
+        4
+    );
+
+
+    // Write response body
+
+    memcpy(
+        conn->wbuf + 4,
+        reply,
+        reply_len
+    );
+
+
+    conn->wbuf_size =
+        4 + reply_len;
+
+    conn->wbuf_sent = 0;
+
+
+    // Remove processed request from rbuf
+
+    size_t remaining =
+        conn->rbuf_size - total_size;
+
+
+    if (remaining > 0) {
+
+        memmove(
+            conn->rbuf,
+            conn->rbuf + total_size,
+            remaining
+        );
+    }
+
+
+    conn->rbuf_size = remaining;
+
+
+    return true;
+}
+
+// Write response to client
+
+static bool handle_write(Conn* conn) {
+
+    while (conn->wbuf_sent < conn->wbuf_size) {
+
+        ssize_t rv = write(
+            conn->fd,
+            conn->wbuf + conn->wbuf_sent,
+            conn->wbuf_size - conn->wbuf_sent
+        );
+
+        // Error
+
+        if (rv < 0) {
+
+            if (errno == EINTR) {
+                continue;
+            }
+
+
+            // Socket isn't ready for writing
+            if (errno == EAGAIN ||
+                errno == EWOULDBLOCK) {
+
+                return true;
+            }
+
+
+            perror("write()");
+            return false;
+        }
+
+
+        // Update number of bytes sent
+
+        conn->wbuf_sent += (size_t)rv;
+    }
+
+
+    // --------------------------------------------------------
+    // Entire response has been sent
+    // --------------------------------------------------------
+
+    conn->wbuf_size = 0;
+    conn->wbuf_sent = 0;
+
+
+    return true;
 }
 
 
-int main(){
-    
-    int fd=socket(AF_INET, SOCK_STREAM, 0);
-    if(fd<0){
+// ============================================================
+// Main
+// ============================================================
+
+int main() {
+
+    // ========================================================
+    // Create listening socket
+    // ========================================================
+
+    int fd = socket(
+        AF_INET,
+        SOCK_STREAM,
+        0
+    );
+
+
+    if (fd < 0) {
         die("socket()");
     }
 
-    int val=1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-     
+
+    // ========================================================
+    // SO_REUSEADDR
+    // ========================================================
+
+    int val = 1;
+
+
+    if (setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &val,
+            sizeof(val)
+        ) < 0) {
+
+        die("setsockopt()");
+    }
+
 
     // Make listening socket non-blocking
+
     fd_set_nonblocking(fd);
 
 
+    // Bind
 
-    // Bind to an address
-    struct sockaddr_in addr={}; // it's holding an IPv4 address
-    addr.sin_family=AF_INET;
-    addr.sin_port=htons(1234); // Port
-    addr.sin_addr.s_addr=htonl(0); // wildcard IP address
-    int rv=bind(fd, (const struct sockaddr *)&addr, sizeof(addr));
+    struct sockaddr_in addr{};
 
-    if(rv){
+
+    addr.sin_family = AF_INET;
+
+    addr.sin_port = htons(1234);
+
+    addr.sin_addr.s_addr =
+        htonl(INADDR_ANY);
+
+
+    int rv = bind(
+        fd,
+        (const struct sockaddr*)&addr,
+        sizeof(addr)
+    );
+
+
+    if (rv < 0) {
         die("bind()");
     }
-    rv=listen(fd, SOMAXCONN);
-    if(rv){
+
+
+    // Listen
+
+    rv = listen(
+        fd,
+        SOMAXCONN
+    );
+
+
+    if (rv < 0) {
         die("listen()");
     }
-    printf("Server listening on port 1234...\n");
 
-    Conn* connections[MAX_CONNECTIONS] = {nullptr};  // Array to hold active connections
+    printf(
+        "Server listening on port 1234...\n"
+    );
 
-    struct pollfd pollfds[MAX_CONNECTIONS + 1]; // +1 for the listening socket
+    Conn* connections[MAX_CONNECTIONS]{};
 
-    while(true){
+    struct pollfd pollfds[MAX_CONNECTIONS + 1];
 
-        int nfds = 1; // Start with the listening socket
-        
+    // Main event loop
+
+    while (true) {
+
+        int nfds = 1;
+
+        // Listening socket
         pollfds[0].fd = fd;
-        pollfds[0].events = POLLIN; // We want to know when we can accept a new connection
+
+        pollfds[0].events = POLLIN;
+
         pollfds[0].revents = 0;
 
-        for(int i=0; i<Max_CONNECTIONS; i++){
-            if(connections[i]==nullptr) continue;
+        // Add connected clients
+        for (int i = 0;
+             i < MAX_CONNECTIONS;
+             i++) {
 
-            pollfds[nfds].fd = connections[i]->fd;
-            pollfds[nfds].events = POLLIN; // We want to know when we can read from the connection
-
-            if(connections[i]->wbuf_size > connections[i]->wbuf_sent){
-                pollfds[nfds].events |= POLLOUT; // We also want to know when we can write to the connection
+            if (connections[i] == nullptr) {
+                continue;
             }
-            pollfds[nfds].revents = 0;
-            nfds++;
 
+            pollfds[nfds].fd =
+                connections[i]->fd;
+            /*
+             * Always watch for incoming data.
+             */
+
+            pollfds[nfds].events =
+                POLLIN;
+
+            if (connections[i]->wbuf_sent <
+                connections[i]->wbuf_size) {
+
+                pollfds[nfds].events |= POLLOUT;
+            }
+
+
+            pollfds[nfds].revents = 0;
+
+
+            nfds++;
         }
 
-        int poll_rv=poll(pollfds, nfds, -1);
-        if(poll_rv<0){
-            if(errno==EINTR) continue; // Retry if interrupted by signal
+
+        // Wait for an event
+        int poll_rv = poll(
+            pollfds,
+            nfds,
+            -1
+        );
+
+
+        if (poll_rv < 0) {
+
+            if (errno == EINTR) {
+                continue;
+            }
+
             die("poll()");
         }
+        // Accept new clients
+        if (pollfds[0].revents & POLLIN) {
 
-        if(pollfds[0].revents & POLLIN){
-            while(true){
+
+            while (true) {
+
                 struct sockaddr_in client_addr{};
-                socklen_t addrlen=sizeof(client_addr);
-                int connfd=accept(fd, (struct sockaddr *)&client_addr, &addrlen);
-                if(connfd<0){
-                    if(errno==EINTR) continue; // Retry if interrupted by signal
-                    if(errno==EAGAIN || errno==EWOULDBLOCK) break; // No more connections to accept
+                socklen_t addrlen =
+                    sizeof(client_addr);
+
+                int connfd = accept(
+                    fd,
+                    (struct sockaddr*)&client_addr,
+                    &addrlen
+                );
+
+                // No more connections waiting
+                if (connfd < 0) {
+
+                    if (errno == EAGAIN ||
+                        errno == EWOULDBLOCK) {
+
+                        break;
+                    }
+                    if (errno == EINTR) {
+                        continue;
+                    }
                     perror("accept()");
                     break;
                 }
 
-                // make client socket non-blocking
-                fd_set_nonblocking(connfd);
-                printf("Accepted new connection: fd=%d\n", connfd);
 
-                // Find a free slot for the new connection
-                bool added=false;
-                for(int i=0; i<MAX_CONNECTIONS; i++){
-                    if(connections[i]==nullptr){
-                        Conn* conn=new Conn();
-                        conn->fd=connfd;
-                        connections[i]=conn;
-                        added=true;
+                // Make client socket non-blocking
+
+                fd_set_nonblocking(connfd);
+
+
+                printf(
+                    "New client connected: fd=%d\n",
+                    connfd
+                );
+
+
+                // Find empty connection slot
+
+                bool added = false;
+
+
+                for (int i = 0;
+                     i < MAX_CONNECTIONS;
+                     i++) {
+
+
+                    if (connections[i] == nullptr) {
+
+
+                        Conn* conn =
+                            new Conn();
+
+
+                        conn->fd =
+                            connfd;
+
+
+                        connections[i] =
+                            conn;
+
+
+                        added = true;
+
+
                         break;
                     }
                 }
-                if(!added){
-                    msg("Too many connections, closing new connection");
+                // Server is full
+
+                if (!added) {
+
+                    msg("Too many clients");
+
                     close(connfd);
                 }
-
             }
         }
+        // Handle clients
+        int poll_index = 1;
 
-        // Handle existing connections
-        int poll_index=1; // Start from 1 because 0 is the listening socket
 
-        for(int i=0; i<MAX_CONNECTIONS; i++){
+        for (int i = 0;
+             i < MAX_CONNECTIONS;
+             i++) {
 
-            Conn* conn=connections[i];
-            if(conn==nullptr) continue;
-            short revents=pollfds[i+1].revents; // +1 because pollfds[0] is the listening socket
+
+            Conn* conn =
+                connections[i];
+
+
+            if (conn == nullptr) {
+                continue;
+            }
+            // Get events for this client
+            short revents =
+                pollfds[poll_index].revents;
+
+
             poll_index++;
-            bool alive=true;
+            bool alive = true;
 
-            // Error / hangup
-            if(revents & (POLLERR | POLLHUP | POLLNVAL)){
-                alive=false;
+            // Socket error / hangup
+            if (revents & (
+                    POLLERR |
+                    POLLHUP |
+                    POLLNVAL
+                )) {
+
+                alive = false;
+            }
+            // Readable
+            if (alive &&
+                (revents & POLLIN)) {
+
+
+                if (!handle_read(conn)) {
+
+                    alive = false;
+                }
+                else {
+
+                    if (conn->wbuf_size == 0) {
+
+                        size_t old_size =
+                            conn->rbuf_size;
+
+
+                        if (!process_request(conn)) {
+
+                            alive = false;
+                        }
+
+                        (void)old_size;
+                    }
+                }
             }
 
+            // Writable
+            if (alive &&
+                (revents & POLLOUT)) {
 
+
+                if (!handle_write(conn)) {
+
+                    alive = false;
+                }
+            }
+            // Close connection
+
+            if (!alive) {
+
+
+                printf(
+                    "Closing client fd=%d\n",
+                    conn->fd
+                );
+
+
+                close(conn->fd);
+
+
+                delete conn;
+
+
+                connections[i] =
+                    nullptr;
+            }
         }
-
-
-
     }
 
 
-
-    // //  Accept connections
-    // while(true){
-    //     struct sockaddr_in client_addr={};
-    //     socklen_t addrlen=sizeof(client_addr);
-    //     int connfd=accept(fd, (struct sockaddr *)&client_addr, &addrlen);
-    //     if(connfd<0){
-    //         continue; // if error occurs, just continue to the next iteration of the loop
-    //     }
-
-    //     // do_something(connfd);
-    //     while(true){
-    //         int32_t err=one_request(connfd);
-    //         if(err){
-    //             break;
-    //         }
-    //     }
-
-    //     close(connfd);
-
-    }
+    close(fd);
 
 
-    // return 0;
-
+    return 0;
 }

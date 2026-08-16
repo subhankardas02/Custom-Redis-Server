@@ -15,39 +15,43 @@ using namespace std;
 const size_t k_max_msg = 4096;
 const int MAX_CONNECTIONS = 100;
 
-
 // Error handling
 
-void die(const char* msg) {
+void die(const char *msg)
+{
     perror(msg);
     exit(EXIT_FAILURE);
 }
 
-static void msg(const char* msg) {
+static void msg(const char *msg)
+{
     fprintf(stderr, "%s\n", msg);
 }
-
 
 // ============================================================
 // Make socket non-blocking
 // ============================================================
 
-static void fd_set_nonblocking(int fd) {
+static void fd_set_nonblocking(int fd)
+{
 
     int flags = fcntl(fd, F_GETFL, 0);
 
-    if (flags < 0) {
+    if (flags < 0)
+    {
         die("fcntl(F_GETFL)");
     }
 
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
         die("fcntl(F_SETFL)");
     }
 }
 
 // Connection state
 
-struct Conn {
+struct Conn
+{
 
     int fd;
 
@@ -69,20 +73,21 @@ struct Conn {
     size_t wbuf_sent = 0;
 };
 
-
 // Read data from client
 
-static bool handle_read(Conn* conn) {
+static bool handle_read(Conn *conn)
+{
 
-    while (true) {
+    while (true)
+    {
 
         size_t available =
             sizeof(conn->rbuf) - conn->rbuf_size;
 
-
         // Buffer is full
 
-        if (available == 0) {
+        if (available == 0)
+        {
             return true;
         }
 
@@ -91,26 +96,26 @@ static bool handle_read(Conn* conn) {
         ssize_t rv = read(
             conn->fd,
             conn->rbuf + conn->rbuf_size,
-            available
-        );
+            available);
 
         // Error
 
-        if (rv < 0) {
+        if (rv < 0)
+        {
 
             // Signal interrupted the system call
-            if (errno == EINTR) {
+            if (errno == EINTR)
+            {
                 continue;
             }
 
-
             // No more data available right now
             if (errno == EAGAIN ||
-                errno == EWOULDBLOCK) {
+                errno == EWOULDBLOCK)
+            {
 
                 return true;
             }
-
 
             perror("read()");
             return false;
@@ -118,13 +123,13 @@ static bool handle_read(Conn* conn) {
 
         // Client closed connection
 
-        if (rv == 0) {
+        if (rv == 0)
+        {
 
             printf("Client disconnected\n");
 
             return false;
         }
-
 
         // Successfully received data
 
@@ -132,23 +137,21 @@ static bool handle_read(Conn* conn) {
 
         printf(
             "Received %zd bytes\n",
-            rv
-        );
-
+            rv);
     }
 }
 
-
 // Process one request
 
-static bool process_request(Conn* conn) {
+static bool process_request(Conn *conn)
+{
 
     // We need at least 4 bytes for the length header
 
-    if (conn->rbuf_size < 4) {
+    if (conn->rbuf_size < 4)
+    {
         return true;
     }
-
 
     // Read message length
 
@@ -157,137 +160,121 @@ static bool process_request(Conn* conn) {
     memcpy(
         &len,
         conn->rbuf,
-        4
-    );
-
+        4);
 
     // Validate message length
 
-    if (len > k_max_msg) {
+    if (len > k_max_msg)
+    {
 
         msg("message too long");
 
         return false;
     }
 
-
-
     size_t total_size =
         4 + (size_t)len;
 
-
     // Complete request hasn't arrived yet
 
-    if (conn->rbuf_size < total_size) {
+    if (conn->rbuf_size < total_size)
+    {
 
         return true;
     }
-
 
     // Complete request received
 
     printf(
         "Client says: %.*s\n",
         (int)len,
-        conn->rbuf + 4
-    );
-
+        conn->rbuf + 4);
 
     // Create response
 
     const char reply[] =
         "Your message was received";
 
-
     uint32_t reply_len =
         (uint32_t)strlen(reply);
-
 
     // Write response length
 
     memcpy(
         conn->wbuf,
         &reply_len,
-        4
-    );
-
+        4);
 
     // Write response body
 
     memcpy(
         conn->wbuf + 4,
         reply,
-        reply_len
-    );
-
+        reply_len);
 
     conn->wbuf_size =
         4 + reply_len;
 
     conn->wbuf_sent = 0;
 
-
     // Remove processed request from rbuf
 
     size_t remaining =
         conn->rbuf_size - total_size;
 
-
-    if (remaining > 0) {
+    if (remaining > 0)
+    {
 
         memmove(
             conn->rbuf,
             conn->rbuf + total_size,
-            remaining
-        );
+            remaining);
     }
 
-
     conn->rbuf_size = remaining;
-
 
     return true;
 }
 
 // Write response to client
 
-static bool handle_write(Conn* conn) {
+static bool handle_write(Conn *conn)
+{
 
-    while (conn->wbuf_sent < conn->wbuf_size) {
+    while (conn->wbuf_sent < conn->wbuf_size)
+    {
 
         ssize_t rv = write(
             conn->fd,
             conn->wbuf + conn->wbuf_sent,
-            conn->wbuf_size - conn->wbuf_sent
-        );
+            conn->wbuf_size - conn->wbuf_sent);
 
         // Error
 
-        if (rv < 0) {
+        if (rv < 0)
+        {
 
-            if (errno == EINTR) {
+            if (errno == EINTR)
+            {
                 continue;
             }
 
-
             // Socket isn't ready for writing
             if (errno == EAGAIN ||
-                errno == EWOULDBLOCK) {
+                errno == EWOULDBLOCK)
+            {
 
                 return true;
             }
-
 
             perror("write()");
             return false;
         }
 
-
         // Update number of bytes sent
 
         conn->wbuf_sent += (size_t)rv;
     }
-
 
     // --------------------------------------------------------
     // Entire response has been sent
@@ -296,16 +283,15 @@ static bool handle_write(Conn* conn) {
     conn->wbuf_size = 0;
     conn->wbuf_sent = 0;
 
-
     return true;
 }
-
 
 // ============================================================
 // Main
 // ============================================================
 
-int main() {
+int main()
+{
 
     // ========================================================
     // Create listening socket
@@ -314,14 +300,12 @@ int main() {
     int fd = socket(
         AF_INET,
         SOCK_STREAM,
-        0
-    );
+        0);
 
-
-    if (fd < 0) {
+    if (fd < 0)
+    {
         die("socket()");
     }
-
 
     // ========================================================
     // SO_REUSEADDR
@@ -329,28 +313,24 @@ int main() {
 
     int val = 1;
 
-
     if (setsockopt(
             fd,
             SOL_SOCKET,
             SO_REUSEADDR,
             &val,
-            sizeof(val)
-        ) < 0) {
+            sizeof(val)) < 0)
+    {
 
         die("setsockopt()");
     }
-
 
     // Make listening socket non-blocking
 
     fd_set_nonblocking(fd);
 
-
     // Bind
 
     struct sockaddr_in addr{};
-
 
     addr.sin_family = AF_INET;
 
@@ -359,42 +339,38 @@ int main() {
     addr.sin_addr.s_addr =
         htonl(INADDR_ANY);
 
-
     int rv = bind(
         fd,
-        (const struct sockaddr*)&addr,
-        sizeof(addr)
-    );
+        (const struct sockaddr *)&addr,
+        sizeof(addr));
 
-
-    if (rv < 0) {
+    if (rv < 0)
+    {
         die("bind()");
     }
-
 
     // Listen
 
     rv = listen(
         fd,
-        SOMAXCONN
-    );
+        SOMAXCONN);
 
-
-    if (rv < 0) {
+    if (rv < 0)
+    {
         die("listen()");
     }
 
     printf(
-        "Server listening on port 1234...\n"
-    );
+        "Server listening on port 1234...\n");
 
-    Conn* connections[MAX_CONNECTIONS]{};
+    Conn *connections[MAX_CONNECTIONS]{};
 
     struct pollfd pollfds[MAX_CONNECTIONS + 1];
 
     // Main event loop
 
-    while (true) {
+    while (true)
+    {
 
         int nfds = 1;
 
@@ -408,9 +384,11 @@ int main() {
         // Add connected clients
         for (int i = 0;
              i < MAX_CONNECTIONS;
-             i++) {
+             i++)
+        {
 
-            if (connections[i] == nullptr) {
+            if (connections[i] == nullptr)
+            {
                 continue;
             }
 
@@ -424,40 +402,39 @@ int main() {
                 POLLIN;
 
             if (connections[i]->wbuf_sent <
-                connections[i]->wbuf_size) {
+                connections[i]->wbuf_size)
+            {
 
                 pollfds[nfds].events |= POLLOUT;
             }
 
-
             pollfds[nfds].revents = 0;
-
 
             nfds++;
         }
-
 
         // Wait for an event
         int poll_rv = poll(
             pollfds,
             nfds,
-            -1
-        );
+            -1);
 
+        if (poll_rv < 0)
+        {
 
-        if (poll_rv < 0) {
-
-            if (errno == EINTR) {
+            if (errno == EINTR)
+            {
                 continue;
             }
 
             die("poll()");
         }
         // Accept new clients
-        if (pollfds[0].revents & POLLIN) {
+        if (pollfds[0].revents & POLLIN)
+        {
 
-
-            while (true) {
+            while (true)
+            {
 
                 struct sockaddr_in client_addr{};
                 socklen_t addrlen =
@@ -465,71 +442,65 @@ int main() {
 
                 int connfd = accept(
                     fd,
-                    (struct sockaddr*)&client_addr,
-                    &addrlen
-                );
+                    (struct sockaddr *)&client_addr,
+                    &addrlen);
 
                 // No more connections waiting
-                if (connfd < 0) {
+                if (connfd < 0)
+                {
 
                     if (errno == EAGAIN ||
-                        errno == EWOULDBLOCK) {
+                        errno == EWOULDBLOCK)
+                    {
 
                         break;
                     }
-                    if (errno == EINTR) {
+                    if (errno == EINTR)
+                    {
                         continue;
                     }
                     perror("accept()");
                     break;
                 }
 
-
                 // Make client socket non-blocking
 
                 fd_set_nonblocking(connfd);
 
-
                 printf(
                     "New client connected: fd=%d\n",
-                    connfd
-                );
-
+                    connfd);
 
                 // Find empty connection slot
 
                 bool added = false;
 
-
                 for (int i = 0;
                      i < MAX_CONNECTIONS;
-                     i++) {
+                     i++)
+                {
 
+                    if (connections[i] == nullptr)
+                    {
 
-                    if (connections[i] == nullptr) {
-
-
-                        Conn* conn =
+                        Conn *conn =
                             new Conn();
-
 
                         conn->fd =
                             connfd;
 
-
                         connections[i] =
                             conn;
 
-
                         added = true;
-
 
                         break;
                     }
                 }
                 // Server is full
 
-                if (!added) {
+                if (!added)
+                {
 
                     msg("Too many clients");
 
@@ -540,54 +511,54 @@ int main() {
         // Handle clients
         int poll_index = 1;
 
-
         for (int i = 0;
              i < MAX_CONNECTIONS;
-             i++) {
+             i++)
+        {
 
-
-            Conn* conn =
+            Conn *conn =
                 connections[i];
 
-
-            if (conn == nullptr) {
+            if (conn == nullptr)
+            {
                 continue;
             }
             // Get events for this client
             short revents =
                 pollfds[poll_index].revents;
 
-
             poll_index++;
             bool alive = true;
 
             // Socket error / hangup
-            if (revents & (
-                    POLLERR |
-                    POLLHUP |
-                    POLLNVAL
-                )) {
+            if (revents & (POLLERR |
+                           POLLHUP |
+                           POLLNVAL))
+            {
 
                 alive = false;
             }
             // Readable
             if (alive &&
-                (revents & POLLIN)) {
+                (revents & POLLIN))
+            {
 
-
-                if (!handle_read(conn)) {
+                if (!handle_read(conn))
+                {
 
                     alive = false;
                 }
-                else {
+                else
+                {
 
-                    if (conn->wbuf_size == 0) {
+                    if (conn->wbuf_size == 0)
+                    {
 
                         size_t old_size =
                             conn->rbuf_size;
 
-
-                        if (!process_request(conn)) {
+                        if (!process_request(conn))
+                        {
 
                             alive = false;
                         }
@@ -599,30 +570,27 @@ int main() {
 
             // Writable
             if (alive &&
-                (revents & POLLOUT)) {
+                (revents & POLLOUT))
+            {
 
-
-                if (!handle_write(conn)) {
+                if (!handle_write(conn))
+                {
 
                     alive = false;
                 }
             }
             // Close connection
 
-            if (!alive) {
-
+            if (!alive)
+            {
 
                 printf(
                     "Closing client fd=%d\n",
-                    conn->fd
-                );
-
+                    conn->fd);
 
                 close(conn->fd);
 
-
                 delete conn;
-
 
                 connections[i] =
                     nullptr;
@@ -630,9 +598,7 @@ int main() {
         }
     }
 
-
     close(fd);
-
 
     return 0;
 }

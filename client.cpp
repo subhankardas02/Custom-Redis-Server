@@ -117,11 +117,6 @@ int main()
     {
         die("connect()");
     }
-    // while(true){
-    //     string s;
-    //     cin>>s;
-    //     send_req(fd, s.c_str());
-    // }
     send_req(fd, "hello");
     send_req(fd, "world");
     send_req(fd, "this is a custom redis client!");

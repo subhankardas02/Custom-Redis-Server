@@ -49,29 +49,15 @@ static void fd_set_nonblocking(int fd)
 
 struct Conn
 {
-
     int fd;
-
-    // Read buffer
-
     char rbuf[4 + k_max_msg];
-
-    // Number of bytes currently stored in rbuf
     size_t rbuf_size = 0;
-
-    // Write buffer
-
     char wbuf[4 + k_max_msg];
-
-    // Total bytes that need to be written
     size_t wbuf_size = 0;
-
-    // Number of bytes already written
     size_t wbuf_sent = 0;
 };
 
 // Read data from client
-
 static bool handle_read(Conn *conn)
 {
 

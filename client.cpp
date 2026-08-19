@@ -117,9 +117,18 @@ int main()
     {
         die("connect()");
     }
-    send_req(fd, "hello");
-    send_req(fd, "world");
-    send_req(fd, "this is a custom redis client!");
+    // Send valid Key-Value commands
+    while(true){
+        string s;
+        cout<<"Enter command"<<endl;
+        getline(cin,s);
+        send_req(fd, s.c_str());
+    }
+    // send_req(fd, "PING");
+    // send_req(fd, "SET mykey 12345");
+    // send_req(fd, "GET mykey");
+    // send_req(fd, "DEL mykey");
+    // send_req(fd, "GET mykey");
 
     close(fd);
     return 0;

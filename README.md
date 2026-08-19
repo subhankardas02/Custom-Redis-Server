@@ -2,17 +2,21 @@
 
 A Redis-inspired in-memory key-value store built from scratch in **C++** using TCP sockets, non-blocking I/O, `poll()`, custom request/response framing, buffering, and an event-driven architecture.
 
+# Custom Redis Server in C++
+
+A Redis-inspired in-memory key-value store built from scratch in **C++** using TCP sockets, non-blocking I/O, `poll()`, custom request/response framing, buffering, and an event-driven architecture.
+
 ## ⚡ Benchmark
 
 The server was benchmarked locally with **100,000 `SET` requests**.
 
-| Metric          |                  Result |
-| --------------- | ----------------------: |
-| Total Requests  |                 100,000 |
-| Operation       |                   `SET` |
-| Total Time      |     **14.6186 seconds** |
-| Throughput      |  **6,840 requests/sec** |
-| Average Latency | **0.146186 ms/request** |
+| Metric          |                 Result |
+| --------------- | ---------------------: |
+| Total Requests  |                100,000 |
+| Operation       |                  `SET` |
+| Total Time      |    **13.1557 seconds** |
+| Throughput      | **7,601 requests/sec** |
+| Average Latency | **0.131557 ms/request** |
 
 ### Benchmark Output
 
@@ -20,9 +24,9 @@ The server was benchmarked locally with **100,000 `SET` requests**.
 Benchmarking 100000 SET requests...
 
 --- Benchmark Results ---
-Total Time:       14.6186 seconds
-Throughput:       6840 Requests/Sec (RPS)
-Avg Latency:      0.146186 ms per request
+Total Time:       13.1557 seconds
+Throughput:       7601 Requests/Sec (RPS)
+Avg Latency:      0.131557 ms per request
 ```
 
 > **Note:** This is a local development benchmark measuring sequential `SET` request/response operations. It is intended as a performance baseline for this implementation and should not be directly compared with production Redis benchmarks.

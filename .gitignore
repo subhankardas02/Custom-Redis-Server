@@ -1,5 +1,20 @@
-redis_server
-*.o
-build/
+# Compiled executables
 server
 client
+benchmark
+
+# Object files
+*.o
+
+# Build directories
+build/
+
+# Debug files
+*.out
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store

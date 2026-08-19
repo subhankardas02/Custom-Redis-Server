@@ -1,35 +1,132 @@
 # Custom Redis Server in C++
 
-A Redis-inspired in-memory key-value store built from scratch in **C++** using low-level Linux networking APIs.
+A Redis-inspired in-memory key-value store built from scratch in **C++** using TCP sockets, non-blocking I/O, `poll()`, custom request/response framing, buffering, and an event-driven architecture.
 
-The project focuses on understanding how a real network server works internally, including **TCP socket programming, non-blocking I/O, event-driven architecture, request buffering, partial reads/writes, request pipelining, and in-memory data storage**.
+## ⚡ Benchmark
 
-The server supports multiple simultaneous TCP clients using `poll()` instead of creating a separate thread for every connection.
+The server was benchmarked locally with **100,000 `SET` requests**.
+
+| Metric          |                  Result |
+| --------------- | ----------------------: |
+| Total Requests  |                 100,000 |
+| Operation       |                   `SET` |
+| Total Time      |     **14.6186 seconds** |
+| Throughput      |  **6,840 requests/sec** |
+| Average Latency | **0.146186 ms/request** |
+
+### Benchmark Output
+
+```text
+Benchmarking 100000 SET requests...
+
+--- Benchmark Results ---
+Total Time:       14.6186 seconds
+Throughput:       6840 Requests/Sec (RPS)
+Avg Latency:      0.146186 ms per request
+```
+
+> **Note:** This is a local development benchmark measuring sequential `SET` request/response operations. It is intended as a performance baseline for this implementation and should not be directly compared with production Redis benchmarks.
 
 ---
 
-## Features
+# Overview
 
-* TCP server built using POSIX socket APIs
+This project is a lightweight Redis-like key-value server implemented from scratch to explore how network servers and in-memory data stores work internally.
+
+Instead of using a networking framework, the server directly uses Linux/POSIX APIs such as:
+
+* `socket()`
+* `bind()`
+* `listen()`
+* `accept()`
+* `read()`
+* `write()`
+* `fcntl()`
+* `poll()`
+
+The server uses a **single event-driven loop** to handle multiple TCP clients without creating a separate thread for every connection.
+
+---
+
+# Features
+
+* TCP client-server communication
 * Non-blocking sockets using `fcntl()` and `O_NONBLOCK`
 * Event-driven I/O using `poll()`
 * Multiple simultaneous client connections
-* Support for up to 100 connected clients
-* Length-prefixed request/response protocol
-* Per-client read and write buffers
-* Handles partial TCP reads and writes
-* Handles `EINTR`, `EAGAIN`, and `EWOULDBLOCK`
-* Request pipelining support
-* In-memory key-value database using `std::unordered_map`
-* Redis-style commands
-* Configurable maximum message size
+* Support for up to 100 clients
+* Custom length-prefixed request/response protocol
+* Per-client read buffers
+* Per-client write buffers
+* Partial read handling
+* Partial write handling
+* `EINTR` handling
+* `EAGAIN` / `EWOULDBLOCK` handling
+* Request pipelining
+* In-memory key-value storage using `std::unordered_map`
+* Redis-style `SET`, `GET`, `DEL`, and `PING` commands
 * Client disconnect and socket error handling
+* Maximum message size of 4096 bytes
 
 ---
 
-## Supported Commands
+# Architecture
 
-### `PING`
+The server follows an event-driven architecture using `poll()`.
+
+```text
+                         +------------------+
+                         | Listening Socket |
+                         +--------+---------+
+                                  |
+                               accept()
+                                  |
+                                  v
+                         +------------------+
+                         |     poll()       |
+                         |    Event Loop    |
+                         +--------+---------+
+                                  |
+              +-------------------+-------------------+
+              |                   |                   |
+              v                   v                   v
+         +---------+         +---------+         +---------+
+         | Client 1|         | Client 2|         | Client N|
+         +---------+         +---------+         +---------+
+              |                   |                   |
+           POLLIN              POLLIN              POLLIN
+           POLLOUT             POLLOUT             POLLOUT
+```
+
+The server continuously waits for socket events using `poll()`.
+
+When a client has data available:
+
+```text
+POLLIN
+  ↓
+read()
+  ↓
+read buffer
+  ↓
+parse request
+  ↓
+execute command
+  ↓
+write buffer
+  ↓
+POLLOUT
+  ↓
+write()
+```
+
+This allows one server process to manage multiple client connections.
+
+---
+
+# Supported Commands
+
+## PING
 
 Checks whether the server is responding.
 
@@ -45,7 +142,7 @@ PONG
 
 ---
 
-### `SET`
+## SET
 
 Stores a value associated with a key.
 
@@ -73,7 +170,7 @@ OK
 
 ---
 
-### `GET`
+## GET
 
 Retrieves the value associated with a key.
 
@@ -101,7 +198,7 @@ Response:
 
 ---
 
-### `DEL`
+## DEL
 
 Deletes a key.
 
@@ -123,102 +220,54 @@ If the key did not exist:
 
 ---
 
-## Architecture
-
-The server follows an event-driven architecture based on `poll()`.
+# Example Session
 
 ```text
-                         +------------------+
-                         | Listening Socket |
-                         +--------+---------+
-                                  |
-                               accept()
-                                  |
-                                  v
-                         +------------------+
-                         |    poll()        |
-                         | Event Loop       |
-                         +--------+---------+
-                                  |
-              +-------------------+-------------------+
-              |                   |                   |
-              v                   v                   v
-         +---------+         +---------+         +---------+
-         | Client 1|         | Client 2|         | Client N|
-         +---------+         +---------+         +---------+
-              |                   |                   |
-           POLLIN              POLLIN              POLLIN
-           POLLOUT             POLLOUT             POLLOUT
-```
+Enter command
+PING
 
-The server does not block waiting for a particular client.
+server says: PONG
 
-Instead, `poll()` monitors all active sockets and tells the server which sockets are ready for reading or writing.
-
----
-
-## How a Request Is Processed
-
-A typical request follows this path:
-
-```text
-Client
-  |
-  | TCP
-  v
-Non-blocking Socket
-  |
-  v
-Read Buffer
-  |
-  v
-Message Framing
-  |
-  v
-Command Parser
-  |
-  v
-Key-Value Store
-  |
-  v
-Response Buffer
-  |
-  v
-Non-blocking write()
-  |
-  v
-Client
-```
-
-For example:
-
-```text
+Enter command
 SET name Subhankar
-```
 
-is received by the server, parsed into:
+server says: OK
 
-```text
-Command = SET
-Key     = name
-Value   = Subhankar
-```
+Enter command
+GET name
 
-and stored in:
+server says: Subhankar
 
-```cpp
-unordered_map<string, string>
+Enter command
+SET language C++
+
+server says: OK
+
+Enter command
+GET language
+
+server says: C++
+
+Enter command
+DEL language
+
+server says: (integer) 1
+
+Enter command
+GET language
+
+server says: (nil)
 ```
 
 ---
 
-# Custom Network Protocol
+# Custom Protocol
 
-TCP is a byte stream and does not preserve application-level message boundaries.
+TCP provides a byte stream rather than individual messages.
 
 Therefore, this project uses a simple **length-prefixed protocol**.
 
-Each request contains:
+Every request is structured as:
 
 ```text
 +----------------------+----------------------+
@@ -232,112 +281,77 @@ For example:
 [4-byte length][SET name Subhankar]
 ```
 
-The server first determines the message length and then waits until the complete request has been received.
+The server reads the length first and then waits until the complete request has been received.
 
 Responses use the same format:
 
 ```text
-[4-byte response length][response body]
++------------------------+----------------------+
+| 4-byte response length | Response body        |
++------------------------+----------------------+
 ```
 
-This allows the server to correctly handle:
-
-* Partial messages
-* Multiple messages in one `read()`
-* TCP packet fragmentation
-* Request pipelining
+This approach allows the server to correctly handle TCP stream behavior.
 
 ---
 
-# Non-Blocking I/O
+# Handling Partial Reads
 
-The server sets sockets to non-blocking mode using:
+A TCP `read()` call does not guarantee that an entire application message will arrive at once.
 
-```cpp
-fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-```
-
-This means a socket operation does not block the entire server while waiting for data.
-
-For example, when there is currently no data available:
+For example, the client may send:
 
 ```text
-read()
-  |
-  +---- EAGAIN / EWOULDBLOCK
-             |
-             v
-        Return to poll()
+SET name Subhankar
 ```
 
-The server can then continue monitoring other clients.
+but the server could receive:
 
----
+```text
+SET nam
+```
 
-# Read Buffer
+followed by:
 
-Each client maintains its own read buffer:
+```text
+e Subhankar
+```
+
+The server therefore maintains a per-client read buffer:
 
 ```cpp
 char rbuf[4 + k_max_msg];
 ```
 
-Incoming bytes are appended to this buffer.
-
-The server only processes a request after the complete length-prefixed message has arrived.
-
-This is important because one `read()` call may receive:
-
-```text
-[SET nam
-```
-
-while a later call receives:
-
-```text
-e Subhankar]
-```
-
-The server combines these bytes in the read buffer before processing the command.
+Incoming bytes are accumulated until a complete length-prefixed request is available.
 
 ---
 
-# Write Buffer
+# Handling Partial Writes
 
-The server also maintains a per-client write buffer:
+The same problem can occur when sending responses.
+
+A single `write()` call may send only part of a response.
+
+The server therefore maintains a per-client write buffer:
 
 ```cpp
 char wbuf[4 + k_max_msg];
 ```
 
-A call to `write()` is not guaranteed to send the entire response.
-
-For example:
-
-```text
-Response:
-[100 bytes]
-
-write()
-   |
-   +---- sends 40 bytes
-   |
-   +---- 60 bytes remain
-```
-
-The server tracks the number of bytes already sent using:
+and tracks how many bytes have already been sent:
 
 ```cpp
 size_t wbuf_sent;
 ```
 
-When the socket becomes writable again, the remaining data is sent.
+If the socket cannot currently accept more data, the server waits for `POLLOUT` and continues writing later.
 
 ---
 
 # Request Pipelining
 
-The server can process multiple complete requests stored in the same read buffer.
+The server can process multiple requests that arrive in the same buffer.
 
 For example:
 
@@ -347,9 +361,7 @@ GET name
 PING
 ```
 
-may arrive together.
-
-The server processes each complete request sequentially:
+The server can process them sequentially:
 
 ```text
 Request 1 → SET
@@ -357,92 +369,89 @@ Request 2 → GET
 Request 3 → PING
 ```
 
-After processing a request, remaining data is moved within the buffer using `memmove()`.
+The remaining unprocessed bytes stay in the client's read buffer until they form another complete request.
+
+---
+
+# Non-Blocking I/O
+
+Client and server sockets are configured as non-blocking using:
+
+```cpp
+fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+```
+
+This prevents a single socket operation from blocking the entire event loop.
+
+If there is currently no data available, `read()` can return:
+
+```text
+EAGAIN
+```
+
+or:
+
+```text
+EWOULDBLOCK
+```
+
+The server then returns to `poll()` and waits for the socket to become ready again.
 
 ---
 
 # In-Memory Database
 
-The database is implemented using:
+The key-value store is implemented using:
 
 ```cpp
 static unordered_map<string, string> g_map;
 ```
 
-Example:
+For example:
 
 ```text
-Key         Value
+Key          Value
 -------------------------
-name        Subhankar
-language    C++
-city        Kolkata
+name         Subhankar
+language     C++
+city         Kolkata
 ```
 
-A command such as:
+When the client executes:
 
 ```text
 SET language C++
 ```
 
-stores:
+the server stores:
 
 ```cpp
 g_map["language"] = "C++";
 ```
 
-A `GET` operation performs a lookup using:
+A `GET` command searches the map and returns the corresponding value.
 
-```cpp
-g_map.find(key);
-```
-
-Since the database is entirely memory-based, all stored data is lost when the server process terminates.
-
----
-
-# Performance Benchmark
-
-A local benchmark was performed using **100,000 `SET` requests**.
-
-### Benchmark Result
-
-| Metric          |                  Result |
-| --------------- | ----------------------: |
-| Requests        |                 100,000 |
-| Operation       |                   `SET` |
-| Total Time      |         14.6186 seconds |
-| Throughput      |  **6,840 requests/sec** |
-| Average Latency | **0.146186 ms/request** |
-
-### Benchmark Output
-
-```text
-Benchmarking 100000 SET requests...
-
---- Benchmark Results ---
-Total Time:       14.6186 seconds
-Throughput:       6840 Requests/Sec (RPS)
-Avg Latency:      0.146186 ms per request
-```
-
-This benchmark demonstrates the current performance of the server for sequential local `SET` request/response operations.
-
-> **Note:** This is a local development benchmark and should not be directly compared with production Redis performance. The benchmark is intended to measure the performance of this implementation and provide a baseline for future optimizations.
+Because the database exists only in memory, **all data is lost when the server stops**.
 
 ---
 
 # Project Structure
 
+The recommended repository structure is:
+
 ```text
-Custom-Redis/
+Custom-Redis-Server/
+│
+├── .gitignore
+├── README.md
+├── Makefile
 │
 ├── server.cpp
 ├── client.cpp
-├── benchmark.cpp
-├── README.md
-└── .gitignore
+└── benchmark.cpp
 ```
+
+Compiled executables such as `server`, `client`, and `benchmark` should not be committed to GitHub. They can be generated locally using `make`.
 
 ---
 
@@ -461,28 +470,44 @@ The project can also be run using **WSL** on Windows.
 
 ---
 
-# Compilation
+# Build
 
-Clone the repository and enter the project directory:
+Clone the repository:
 
 ```bash
 git clone <your-repository-url>
-cd Custom-Redis
+cd Custom-Redis-Server
 ```
 
-Compile the server:
+If a `Makefile` is included:
+
+```bash
+make
+```
+
+This builds:
+
+```text
+server
+client
+benchmark
+```
+
+You can also compile manually:
+
+### Server
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -O2 server.cpp -o server
 ```
 
-Compile the client:
+### Client
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -O2 client.cpp -o client
 ```
 
-Compile the benchmark:
+### Benchmark
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -O2 benchmark.cpp -o benchmark
@@ -526,30 +551,13 @@ You should see:
 Enter command
 ```
 
-Now enter commands interactively.
-
-Example:
+You can now enter commands such as:
 
 ```text
-Enter command
 PING
-
-server says: PONG
-
-Enter command
 SET name Subhankar
-
-server says: OK
-
-Enter command
 GET name
-
-server says: Subhankar
-
-Enter command
 DEL name
-
-server says: (integer) 1
 ```
 
 ---
@@ -568,7 +576,7 @@ Then open another terminal and run:
 ./benchmark
 ```
 
-Example output:
+Example:
 
 ```text
 Benchmarking 100000 SET requests...
@@ -579,13 +587,13 @@ Throughput:       6840 Requests/Sec (RPS)
 Avg Latency:      0.146186 ms per request
 ```
 
-For meaningful comparisons, run benchmarks under the same machine and system conditions.
+For meaningful performance comparisons, benchmarks should be run under consistent hardware and system conditions.
 
 ---
 
 # Multiple Clients
 
-The server is designed to handle multiple simultaneous connections using `poll()`.
+The server supports multiple simultaneous TCP clients.
 
 You can test this by opening multiple terminals.
 
@@ -613,7 +621,7 @@ You can test this by opening multiple terminals.
 ./client
 ```
 
-All clients connect to the same server and share the same in-memory key-value store.
+All clients communicate with the same server and therefore share the same in-memory database.
 
 For example:
 
@@ -630,61 +638,31 @@ Alice
 
 ---
 
-# Important System Calls
+# Important APIs Used
 
-The project uses several Linux/POSIX system calls and APIs.
-
-### `socket()`
-
-Creates the TCP socket.
-
-```cpp
-socket(AF_INET, SOCK_STREAM, 0);
-```
-
-### `bind()`
-
-Associates the socket with port `1234`.
-
-### `listen()`
-
-Places the server socket into listening mode.
-
-### `accept()`
-
-Accepts incoming client connections.
-
-### `fcntl()`
-
-Configures sockets for non-blocking I/O.
-
-### `poll()`
-
-Monitors multiple sockets for I/O events.
-
-### `read()`
-
-Reads incoming bytes from clients.
-
-### `write()`
-
-Sends response bytes to clients.
-
-### `close()`
-
-Closes sockets when clients disconnect.
+| API        | Purpose                          |
+| ---------- | -------------------------------- |
+| `socket()` | Creates a TCP socket             |
+| `bind()`   | Assigns IP address and port      |
+| `listen()` | Starts listening for connections |
+| `accept()` | Accepts a client connection      |
+| `fcntl()`  | Enables non-blocking I/O         |
+| `poll()`   | Monitors multiple sockets        |
+| `read()`   | Receives data                    |
+| `write()`  | Sends data                       |
+| `close()`  | Closes a socket                  |
 
 ---
 
 # Error Handling
 
-The server handles common errors associated with non-blocking sockets.
+The server handles common errors related to non-blocking sockets.
 
 ### `EAGAIN` / `EWOULDBLOCK`
 
-Indicates that an operation would block because the socket is not currently ready.
+Indicates that the socket is not currently ready for the requested operation.
 
-The server waits for the next appropriate `poll()` event.
+The server waits for the appropriate `poll()` event instead of treating this as a fatal error.
 
 ### `EINTR`
 
@@ -694,7 +672,7 @@ The server retries the operation.
 
 ### `POLLHUP`
 
-Indicates that a client has disconnected.
+Indicates that the client has disconnected.
 
 The server closes and removes the corresponding connection.
 
@@ -704,48 +682,48 @@ The server closes and removes the corresponding connection.
 
 This project implements a small subset of Redis functionality and is primarily intended for learning and experimentation.
 
-Current limitations include:
+Current limitations:
 
-* No persistence
+* Data is stored only in memory
 * Data is lost when the server stops
 * Maximum message size is 4096 bytes
-* Maximum of 100 client connections
+* Maximum of 100 simultaneous connections
 * No authentication
 * No Redis RESP protocol
+* No persistence
 * No replication
 * No transactions
 * No TTL/expiration
 * Limited command set
 * Single-threaded event loop
-* No production-level memory management or eviction policy
 
 ---
 
 # Future Improvements
 
-Possible future improvements include:
+Possible improvements include:
 
 * Implement the Redis RESP protocol
 * Add more Redis commands
 * Add `EXPIRE` and TTL support
 * Add persistent storage
-* Implement an append-only log
+* Implement append-only logging
 * Add snapshot-based persistence
 * Improve command parsing
 * Add `epoll()` support
 * Add connection timeouts
-* Add automated unit and integration tests
-* Add concurrent/multi-client benchmarking
-* Add request pipelining benchmarks
+* Add automated tests
+* Add concurrent multi-client benchmarks
+* Add pipelining benchmarks
 * Add performance metrics
 * Add graceful server shutdown
 * Add configuration support
 
 ---
 
-# Learning Outcomes
+# What I Learned
 
-This project provided practical experience with:
+Building this project provided practical experience with:
 
 * TCP/IP networking
 * Client-server architecture
@@ -753,12 +731,12 @@ This project provided practical experience with:
 * Non-blocking I/O
 * Event-driven programming
 * `poll()` and I/O multiplexing
-* TCP stream behavior
+* TCP byte-stream behavior
 * Partial reads and writes
 * Read/write buffering
 * Request pipelining
 * Length-prefixed protocols
-* Error handling with `errno`
+* `errno`-based error handling
 * In-memory data structures
 * C++ system programming
 * Linux system calls
@@ -774,7 +752,7 @@ C++
 C++17
 Linux / POSIX
 TCP/IP
-BSD/POSIX Sockets
+POSIX Sockets
 poll()
 fcntl()
 Non-blocking I/O
@@ -785,9 +763,9 @@ std::unordered_map
 
 # Project Goal
 
-The goal of this project is to understand the core concepts behind an in-memory networked data store by implementing the server, networking layer, protocol framing, buffering, command processing, and client communication from scratch rather than relying on an existing Redis server implementation.
+The goal of this project is to understand the core concepts behind an in-memory networked data store by implementing the networking layer, event loop, protocol framing, buffering, command processing, client communication, and key-value storage from scratch.
 
-This project is a learning-focused Redis-inspired server and is **not intended to be a drop-in replacement for Redis**.
+This project is **Redis-inspired and educational** and is not intended to be a drop-in replacement for Redis.
 
 ---
 

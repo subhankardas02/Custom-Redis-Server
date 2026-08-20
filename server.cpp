@@ -10,7 +10,6 @@
 #include <stdint.h>
 #include <assert.h>
 
-// Added for the Key-Value store and string parsing
 #include <unordered_map>
 #include <sstream>
 #include <vector>
@@ -21,7 +20,7 @@ using namespace std;
 const size_t k_max_msg = 4096;
 const int MAX_CONNECTIONS = 100;
 
-// Our in-memory database
+// unordered_map to store key-value pairs
 static unordered_map<string, string> g_map;
 
 // Error handling

@@ -2,6 +2,7 @@
 #include <cstring>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 #include <chrono>
 #include <vector>
@@ -49,8 +50,13 @@ static bool send_cmd(int fd, const char *text) {
 
 int main() {
     int total_requests = 100000;
-    
+
     int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    // Disable Nagle's Algorithm on client side
+    int tcp_nodelay = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &tcp_nodelay, sizeof(tcp_nodelay));
+
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(1234);

@@ -10,28 +10,29 @@ This project was built to understand how an in-memory database such as Redis wor
 
 ## Features
 
-### 1. In-Memory Key-Value Storage
+### In-Memory Key-Value Storage
 - Stores keys and values directly in memory.
 - Supports string keys and string values.
-- Fast lookup, insertion, and deletion using a custom hash table.
+- Uses a custom hash table for fast lookup, insertion, and deletion.
 
-### 2. Custom Hash Table
+### Custom Hash Table
 The project implements its own hash table instead of using `std::unordered_map`.
 
 It includes:
-- Custom hash function based on the FNV-1a style algorithm.
+- Custom hash function.
 - Separate chaining for collision handling.
 - Key lookup and deletion.
 - Dynamic table resizing.
-- Incremental rehashing to avoid doing the entire resize operation at once.
+- Incremental rehashing.
 
-The hash table uses two tables during resizing:
-- `ht1` — the new/current table.
-- `ht2` — the old table being gradually migrated.
+During resizing, two hash tables are used:
 
-A limited amount of rehashing work is performed during normal operations.
+- `ht1` — new/current table.
+- `ht2` — old table being gradually migrated.
 
-### 3. TTL and Key Expiration
+A limited amount of rehashing work is performed during normal operations rather than moving all entries at once.
+
+### TTL and Key Expiration
 The server supports key expiration using:
 
 ```text
@@ -39,15 +40,15 @@ EXPIRE key seconds
 TTL key
 ```
 
-A custom **min-heap** is used to efficiently track the next key that should expire.
+A custom **binary min-heap** is used to track key expiration times.
 
-This allows the server to:
+The server can:
 - Add expiration timers.
 - Update existing timers.
 - Remove timers when keys are deleted or overwritten.
 - Automatically delete expired keys.
 
-### 4. Event-Driven Networking
+### Event-Driven Networking
 The server uses Linux:
 
 - TCP sockets
@@ -59,27 +60,17 @@ The server uses Linux:
 
 Instead of creating a thread for every client, the server uses an event-driven architecture to handle multiple connections.
 
-### 5. RESP Protocol Support
+### RESP Protocol Support
 The server implements basic Redis Serialization Protocol (RESP) request parsing and response generation.
 
-It supports both:
-- Standard RESP array commands used by `redis-cli` and `redis-benchmark`.
-- Simple inline commands for testing with tools such as `telnet`/manual TCP clients.
+It supports:
+- RESP array commands used by `redis-cli` and `redis-benchmark`.
+- Inline commands for simple manual testing.
 
-Example RESP request:
-
-```text
-*2\r\n
-$3\r\n
-GET\r\n
-$3\r\n
-foo\r\n
-```
-
-### 6. Non-Blocking I/O
+### Non-Blocking I/O
 Client sockets are configured as non-blocking.
 
-The server correctly handles common conditions such as:
+The server handles common conditions such as:
 
 ```text
 EAGAIN
@@ -88,7 +79,7 @@ EINTR
 EOF
 ```
 
-This allows the event loop to continue processing other clients instead of blocking on a single connection.
+This allows the event loop to continue processing other clients without blocking on a single connection.
 
 ---
 
@@ -96,7 +87,7 @@ This allows the event loop to continue processing other clients instead of block
 
 | Command | Description |
 |---|---|
-| `PING` | Test whether the server is responding |
+| `PING` | Check whether the server is responding |
 | `SET key value` | Store a value |
 | `GET key` | Retrieve a value |
 | `DEL key` | Delete a key |
@@ -104,7 +95,7 @@ This allows the event loop to continue processing other clients instead of block
 | `TTL key` | Get remaining TTL |
 | `COMMAND` | Basic compatibility response for clients such as `redis-cli` |
 
-### Examples
+### Example
 
 ```text
 SET name Subhankar
@@ -112,7 +103,7 @@ GET name
 DEL name
 ```
 
-TTL example:
+### TTL Example
 
 ```text
 SET session abc123
@@ -120,9 +111,16 @@ EXPIRE session 60
 TTL session
 ```
 
+After the TTL expires:
+
+```text
+GET session
+(nil)
+```
+
 ---
 
-## Project Structure
+# Project Structure
 
 ```text
 Custom-Redis/
@@ -171,7 +169,7 @@ hm_insert()
 hm_pop()
 ```
 
-Also implements incremental hash table resizing.
+It also implements incremental hash table resizing.
 
 #### `heap.h / heap.cpp`
 Custom binary min-heap implementation used for key expiration.
@@ -191,7 +189,7 @@ Utility functions for:
 - Setting sockets to non-blocking mode.
 
 #### `Makefile`
-Automates compilation of the project using `g++`.
+Automates compilation using `g++`.
 
 ---
 
@@ -199,21 +197,30 @@ Automates compilation of the project using `g++`.
 
 ## Requirements
 
-Linux or WSL Ubuntu is recommended.
+The project is developed and tested in a **Linux/WSL Ubuntu environment**.
 
-Install the compiler and build tools:
+Required tools:
 
-```bash
-sudo apt update
-sudo apt install g++ make
+```text
+g++
+make
+redis-cli
+redis-benchmark
 ```
 
 The project uses:
 
 ```text
 C++17
-Linux sockets
-epoll
+Linux TCP sockets
+Linux epoll
+```
+
+On Ubuntu/WSL, install the required build tools with:
+
+```bash
+sudo apt update
+sudo apt install g++ make redis-tools
 ```
 
 ---
@@ -234,7 +241,7 @@ client
 benchmark
 ```
 
-Object files are placed inside:
+Object files are generated inside:
 
 ```text
 obj/
@@ -242,9 +249,9 @@ obj/
 
 ---
 
-## Run the Server
+# Run the Server
 
-Start the server with:
+Start the server:
 
 ```bash
 ./server
@@ -262,17 +269,19 @@ You should see:
 RESP Server listening on port 1234 using epoll...
 ```
 
+Keep the server running in one terminal.
+
 ---
 
-# Testing With redis-cli
+# Test With redis-cli
 
-If `redis-cli` is installed, connect to the custom server:
+Open another terminal and run:
 
 ```bash
 redis-cli -p 1234
 ```
 
-Then test:
+Then:
 
 ```text
 127.0.0.1:1234> PING
@@ -301,7 +310,7 @@ OK
 (integer) 10
 ```
 
-After the TTL expires:
+After the key expires:
 
 ```text
 127.0.0.1:1234> GET user
@@ -312,65 +321,185 @@ After the TTL expires:
 
 # Benchmark
 
-The server was benchmarked using the standard Redis benchmarking tool:
+The server was benchmarked using `redis-benchmark`.
+
+## Benchmark Environment
+
+| Property | Value |
+|---|---|
+| Environment | Linux / WSL Ubuntu |
+| Language | C++17 |
+| Compiler | `g++` |
+| Compiler Optimization | `-O3` |
+| Build System | GNU Make |
+| Networking | Linux TCP sockets + `epoll` |
+| Benchmark Tool | `redis-benchmark` |
+| Server Port | `1234` |
+| Requests | `100,000` |
+| Benchmark Mode | Quiet (`-q`) |
+| Commands | `SET`, `GET`, `PING` |
+
+The benchmark was executed with:
 
 ```bash
-redis-benchmark -p 1234 -t set,get -n 100000 -c 50 -q
+redis-benchmark -p 1234 -t set,get,ping -n 100000 -q
 ```
 
-### Benchmark Configuration
-
-| Parameter | Value |
-|---|---:|
-| Operations | 100,000 |
-| Concurrent clients | 50 |
-| Commands | SET, GET |
-| Server port | 1234 |
-| Benchmark tool | `redis-benchmark` |
-
-### Results
+### Benchmark Results
 
 ```text
 WARNING: Could not fetch server CONFIG
-SET: 92165.90 requests per second, p50=0.239 msec
-GET: 118203.30 requests per second, p50=0.199 msec
+PING_INLINE: 126742.72 requests per second, p50=0.207 msec
+PING_MBULK: 126582.27 requests per second, p50=0.207 msec
+SET: 122549.02 requests per second, p50=0.207 msec
+GET: 129701.68 requests per second, p50=0.199 msec
 ```
 
-### Summary
+### Results Summary
 
 | Operation | Throughput | p50 Latency |
 |---|---:|---:|
-| SET | **92,165.90 req/s** | **0.239 ms** |
-| GET | **118,203.30 req/s** | **0.199 ms** |
+| PING_INLINE | **126,742.72 req/s** | **0.207 ms** |
+| PING_MBULK | **126,582.27 req/s** | **0.207 ms** |
+| SET | **122,549.02 req/s** | **0.207 ms** |
+| GET | **129,701.68 req/s** | **0.199 ms** |
 
-The `CONFIG` warning is expected because this custom server does not implement Redis's `CONFIG` command. The benchmark still successfully executed the `SET` and `GET` tests.
+### Benchmark Notes
 
-> Benchmark numbers depend on CPU, OS, WSL configuration, compiler optimization, background processes, and other system conditions. They should be treated as results from this particular test environment rather than a direct comparison with production Redis.
+The benchmark used:
+
+- **100,000 total requests**
+- `SET`, `GET`, and `PING` commands
+- The server running locally on port `1234`
+- Optimized C++17 compilation with `-O3`
+- Linux/WSL Ubuntu
+- `redis-benchmark` in quiet mode
+
+The `CONFIG` warning appears because the custom server does not implement Redis's `CONFIG` command. It does **not** prevent the `SET`, `GET`, or `PING` benchmark tests from running.
+
+> Benchmark results depend on CPU, operating system, WSL configuration, background processes, compiler version, and other system conditions. These numbers represent the result from this development environment and should not be treated as a direct comparison with production Redis.
 
 ---
 
-# Makefile Commands
+# Architecture
 
-Build everything:
+```text
+                         Client
+                           |
+                           | TCP
+                           v
+                  +-------------------+
+                  | Non-blocking Socket|
+                  +---------+---------+
+                            |
+                            v
+                  +-------------------+
+                  |       epoll       |
+                  |    Event Loop      |
+                  +---------+---------+
+                            |
+                   +--------+--------+
+                   |                 |
+                   v                 v
+             Request Parser    Response Buffer
+                   |
+                   v
+             Command Handler
+                   |
+             +-----+------+
+             |            |
+             v            v
+        Hash Table     Min Heap
+             |            |
+             v            v
+        Key / Value    Expiration
+           Store         Timers
+```
+
+---
+
+# Data Structures
+
+## Custom Hash Table
+
+Keys are hashed and mapped to buckets:
+
+```text
+Hash(key)
+    |
+    v
+ Bucket
+    |
+    +---- Entry
+    |
+    +---- Entry
+    |
+    +---- Entry
+```
+
+Collisions are handled using linked-list chaining through `HNode::next`.
+
+### Incremental Rehashing
+
+During resizing:
+
+```text
+                HMap
+              /      \
+            ht1      ht2
+             |        |
+        new table   old table
+                       |
+                       v
+              incremental migration
+```
+
+Instead of migrating every key in one operation, entries are gradually moved from `ht2` to `ht1`.
+
+This reduces the chance of a large pause during hash table resizing.
+
+---
+
+## Min-Heap for TTL
+
+Expiration timestamps are stored in a binary min-heap:
+
+```text
+                earliest
+                   |
+           +-------+-------+
+           |               |
+          ...             ...
+```
+
+The smallest expiration timestamp stays at the root, allowing the server to efficiently find the next key that needs to expire.
+
+---
+
+# Makefile
+
+The project uses a Makefile to automate compilation.
+
+Build:
 
 ```bash
 make
 ```
 
-Clean compiled files:
+Clean:
 
 ```bash
 make clean
 ```
 
-Build again after cleaning:
+Rebuild:
 
 ```bash
 make clean
 make
 ```
 
-The Makefile compiles with:
+The project is compiled using:
 
 ```text
 -O3
@@ -378,104 +507,17 @@ The Makefile compiles with:
 -std=c++17
 ```
 
-`-O3` enables aggressive compiler optimizations, while `-Wall` enables common compiler warnings.
+Where:
 
----
-
-# Architecture
-
-The high-level architecture is:
-
-```text
-                    Client
-                      |
-                      | TCP
-                      v
-              +---------------+
-              |  Non-blocking  |
-              |     Socket     |
-              +-------+-------+
-                      |
-                      v
-              +---------------+
-              |     epoll      |
-              |  Event Loop    |
-              +-------+-------+
-                      |
-             +--------+--------+
-             |                 |
-             v                 v
-       Request Parser     Response Buffer
-             |
-             v
-      Command Execution
-             |
-       +-----+------+
-       |            |
-       v            v
-   Hash Table    Min Heap
-       |            |
-       |            |
-       v            v
-   Key/Value     Expiration
-     Store         Timers
-```
-
----
-
-# Data Structures
-
-## Hash Table
-
-```text
-Hash(key)
-   |
-   v
-Bucket
-   |
-   +---- Entry
-   |
-   +---- Entry
-   |
-   +---- Entry
-```
-
-Collisions are handled using linked lists through `HNode::next`.
-
-During resizing:
-
-```text
-          HMap
-        /      \
-      ht1      ht2
-      |         |
-   new table   old table
-                 |
-                 v
-          incremental migration
-```
-
-This avoids moving every key in a single expensive operation.
-
-## Min-Heap
-
-Expiration times are stored in a binary min-heap:
-
-```text
-             earliest
-                |
-        +-------+-------+
-        |               |
-       ...             ...
-```
-
-The smallest expiration timestamp remains at the root, allowing the server to efficiently determine which key should expire next.
+- `-O3` enables compiler optimizations.
+- `-Wall` enables common compiler warnings.
+- `-std=c++17` enables C++17 features.
 
 ---
 
 # Design Highlights
 
-This project focuses on implementing important systems concepts rather than relying entirely on high-level library abstractions.
+This project focuses on implementing important systems concepts instead of relying entirely on high-level abstractions.
 
 ### Concepts implemented
 
@@ -493,58 +535,58 @@ This project focuses on implementing important systems concepts rather than rely
 - Monotonic clocks
 - Dynamic memory management
 - Makefile-based C++ builds
+- Performance benchmarking
 
 ---
 
 # Limitations
 
-This project intentionally implements only a subset of Redis functionality.
+This project currently implements only a subset of Redis functionality.
 
-It currently does **not** aim to provide:
+It does not currently aim to provide:
 
-- Persistence/RDB
+- Persistence / RDB
 - AOF
 - Replication
 - Redis Cluster
 - Authentication
 - Pub/Sub
 - Transactions
-- Lists/Sets/Sorted Sets
+- Lists / Sets / Sorted Sets
 - Lua scripting
 - Full Redis command compatibility
 - Production-grade memory management
 - Full `CONFIG` command support
 
-The goal is to understand how the core pieces of an in-memory key-value server work.
+The goal is to understand how the core components of an in-memory key-value server work.
 
 ---
 
 # Future Improvements
 
-Possible improvements include:
-
 - [ ] Implement more Redis commands
 - [ ] Add `MGET` / `MSET`
-- [ ] Add multiple data types
+- [ ] Add multiple Redis data types
 - [ ] Add persistence using RDB
 - [ ] Add AOF logging
 - [ ] Add authentication
-- [ ] Improve protocol parsing
+- [ ] Improve RESP protocol parsing
 - [ ] Add pipelining support
 - [ ] Add connection limits
 - [ ] Add memory usage statistics
-- [ ] Add automated tests
+- [ ] Add automated unit/integration tests
 - [ ] Add more detailed benchmarking
 - [ ] Add graceful server shutdown
-- [ ] Improve error handling and malformed-request handling
+- [ ] Improve malformed-request handling
+- [ ] Add benchmark comparisons across different client counts
 
 ---
 
 # Why I Built This
 
-I built this project to learn how an in-memory database and network server work internally instead of only using existing database/server libraries.
+I built this project to understand how an in-memory database and network server work internally rather than only using existing database/server libraries.
 
-The project gave me hands-on experience with:
+The project provided hands-on experience with:
 
 - Systems programming in C++
 - Network programming
@@ -552,9 +594,9 @@ The project gave me hands-on experience with:
 - Data structures
 - Event-driven architecture
 - Memory management
-- Hash tables and rehashing
-- Heaps and timer management
-- Protocol design
+- Hash tables and incremental rehashing
+- Binary heaps and timer management
+- Protocol parsing
 - Performance benchmarking
 
 ---
@@ -566,8 +608,10 @@ The project gave me hands-on experience with:
 - **I/O Multiplexing:** `epoll`
 - **Data Structures:** Custom Hash Table + Binary Min-Heap
 - **Protocol:** RESP
-- **Build:** Make + g++
-- **Testing/Benchmarking:** `redis-cli`, `redis-benchmark`
+- **Build System:** GNU Make
+- **Compiler:** g++
+- **Testing:** `redis-cli`
+- **Benchmarking:** `redis-benchmark`
 - **Environment:** Linux / WSL Ubuntu
 
 ---
